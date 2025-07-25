@@ -1,10 +1,6 @@
 import torch
-import torch.nn as nn
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 from collections import defaultdict
-from itertools import product
 import pandas as pd
 from pathlib import Path
 import pickle
@@ -12,6 +8,8 @@ from datetime import datetime
 import os
 import time
 import glob
+import hashlib
+import gc
 from torch.nn.utils.rnn import pack_sequence, pad_packed_sequence
 
 
@@ -148,17 +146,14 @@ class StateMergerAnalyzer:
     def states_merged(self, state1, state2):
         """Check if two hidden states have merged (distance < epsilon) - SAFE VERSION"""
         try:
-            # Ensure inputs are numpy arrays
             if hasattr(state1, 'cpu'):
                 state1 = state1.cpu().numpy()
             if hasattr(state2, 'cpu'):
                 state2 = state2.cpu().numpy()
 
-            # Compute distance
             distance = np.linalg.norm(state1 - state2)
             result = distance < self.epsilon
 
-            # Explicit cleanup
             del distance
 
             return result
@@ -177,8 +172,9 @@ class StateMergerAnalyzer:
             f"Finding agreeing prefix pairs among {len(prefixes)} prefixes...")
         agreeing_pairs = []
 
-        # Only consider pairs where both prefixes are <= L_train
-        valid_prefixes = [p for p in prefixes if len(p) <= self.L_train]
+        # Only consider pairs where both prefixes are <= max_continuation_length
+        valid_prefixes = [p for p in prefixes if len(
+            p) <= max_continuation_length]
 
         total_pairs = len(valid_prefixes) * (len(valid_prefixes) - 1) // 2
         checked = 0
@@ -190,8 +186,6 @@ class StateMergerAnalyzer:
                     print(
                         f"  Checked {checked}/{total_pairs} pairs ({100*checked/total_pairs:.1f}%)")
 
-                # Check if they agree on all continuations
-                # The prefixes_agree method already handles all constraint checking
                 if self.prefixes_agree(prefix1, prefix2, max_continuation_length):
                     agreeing_pairs.append((prefix1, prefix2))
 
@@ -200,10 +194,7 @@ class StateMergerAnalyzer:
 
     def _get_cache_filename(self, max_continuation_length):
         """Generate cache filename based on model parameters"""
-        # Create a hash based on model state and parameters
-        import hashlib
 
-        # Get model state dict as string for hashing
         model_str = str(sorted(self.model.state_dict().items())
                         [:5])  # First 5 items for speed
         params_str = f"L{self.L_train}_eps{self.epsilon}_cont{max_continuation_length}"
@@ -214,13 +205,12 @@ class StateMergerAnalyzer:
 
         return self.cache_dir / f"merger_analysis_{model_hash}.pkl"
 
-    # ---------- Core analysis ---------- #
+    # Core analysis (everything above is a helper function, make sure you understand this below) -----------------
 
     def analyze_state_mergers(self, max_continuation_length=3):
         """Analyze state mergers with caching"""
         cache_file = self._get_cache_filename(max_continuation_length)
 
-        # Try to load from cache
         if cache_file.exists():
             try:
                 print(f"📁 Loading cached results from: {cache_file}")
@@ -241,11 +231,8 @@ class StateMergerAnalyzer:
                 print(f"⚠️  Cache loading failed: {e}")
                 print("   Proceeding with fresh analysis...")
 
-        # Perform fresh analysis
         print(f"🔄 No cache found. Running fresh analysis...")
         print(f"   Cache will be saved to: {cache_file}")
-
-        # Your existing analysis code here
 
         agreeing_prefix_pairs = self._gen_agreeing_prefix(
             max_continuation_length)
@@ -253,7 +240,6 @@ class StateMergerAnalyzer:
         merge_data, merge_fractions = self._run_fresh_analysis_chunked_xl(
             agreeing_prefix_pairs, max_continuation_length)
 
-        # Save to cache
         if merge_data is not None:
             try:
                 cache_data = {
@@ -279,13 +265,11 @@ class StateMergerAnalyzer:
         return merge_data, merge_fractions
 
     def _gen_agreeing_prefix(self, max_continuation_length):
-        # Step 1: Generate all prefixes up to L_train
         print(
-            f"\nStep 1: Generating all prefixes up to length {self.L_train}...")
-        all_prefixes = self.generate_all_prefixes(self.L_train)
+            f"\nStep 1: Generating all prefixes up to length {max_continuation_length}...")
+        all_prefixes = self.generate_all_prefixes(max_continuation_length)
         print(f"Generated {len(all_prefixes)} prefixes")
 
-        # Step 2: Find pairs that agree on all continuations
         print("\nStep 2: Finding pairs that agree on continuations...")
         agreeing_pairs = self.find_agreeing_prefix_pairs(
             all_prefixes, max_continuation_length
@@ -305,6 +289,7 @@ class StateMergerAnalyzer:
             for pair in agreeing_pairs[key]:
                 yield key, pair
 
+    # Called xl because I spent hours trying to get it to work with larger input data without freezing computer
     def _run_fresh_analysis_chunked_xl(self, agreeing_pairs, max_continuation_length, chunk_size=100, save_every=5):
         """
         Process in chunks using generator and save intermediate results every few chunks.
@@ -313,12 +298,10 @@ class StateMergerAnalyzer:
         if max_continuation_length is not None:
             analysis_base_dir = "../models/analysis"
             if os.path.exists(analysis_base_dir):
-                # Look for existing results with the same max_continuation_length
                 pattern = f"{analysis_base_dir}/results_{max_continuation_length}_*/final_results.pkl"
                 existing_files = glob.glob(pattern)
 
                 if existing_files:
-                    # Sort by modification time and get the most recent
                     most_recent = max(existing_files, key=os.path.getmtime)
                     print(
                         f"\n🔍 Found existing results for max_continuation_length={max_continuation_length}")
@@ -328,7 +311,6 @@ class StateMergerAnalyzer:
                         with open(most_recent, 'rb') as f:
                             cached_merge_data = pickle.load(f)
 
-                        # Compute merge fractions from cached data
                         print("Computing merge fractions from cached data...")
                         merge_fractions = {}
                         for (m1, m2), data_list in cached_merge_data.items():
@@ -351,11 +333,9 @@ class StateMergerAnalyzer:
                         print(f"⚠️  Error loading cached results: {e}")
                         print("Proceeding with fresh analysis...")
 
-        # Create results directory
         results_dir = f"../models/analysis/results_{max_continuation_length}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         os.makedirs(results_dir, exist_ok=True)
 
-        # Count total pairs without storing them all in memory
         n_p = len(agreeing_pairs)
         print(f"\nProcessing {n_p} pairs in chunks of {chunk_size}")
         print(f"Results will be saved to: {results_dir}")
@@ -370,25 +350,20 @@ class StateMergerAnalyzer:
             current_chunk.append((original_key, pair))
             processed_pairs += 1
 
-            # Process chunk when it reaches the desired size
             if len(current_chunk) >= chunk_size:
                 chunk_count += 1
                 print(
                     f"Processing chunk {chunk_count} (pairs {processed_pairs-len(current_chunk)+1}-{processed_pairs} of {n_p})")
 
-                # Process all pairs in current chunk
                 for chunk_key, chunk_pair in current_chunk:
                     prefix1 = chunk_pair['prefix1']
                     prefix2 = chunk_pair['prefix2']
 
-                    # Get hidden states
                     state1 = self.get_hidden_state(prefix1)
                     state2 = self.get_hidden_state(prefix2)
 
-                    # Check if merged
                     merged = self.states_merged(state1, state2)
 
-                    # Record data
                     m1, m2 = len(prefix1), len(prefix2)
                     merge_data[(m1, m2)].append({
                         'original_key': chunk_key,
@@ -398,13 +373,10 @@ class StateMergerAnalyzer:
                         'distance': float(np.linalg.norm(state1 - state2))
                     })
 
-                    # Immediate cleanup to save memory
                     del state1, state2
 
-                # Clear current chunk from memory
                 current_chunk = []
 
-                # Save intermediate results every few chunks
                 if chunk_count % save_every == 0:
                     save_file = os.path.join(
                         results_dir, f'intermediate_{chunk_count}.pkl')
@@ -412,8 +384,6 @@ class StateMergerAnalyzer:
                         pickle.dump(dict(merge_data), f)
                     print(f"  Saved intermediate results to {save_file}")
 
-                # Garbage collection and cooling break
-                import gc
                 gc.collect()
                 time.sleep(0.5)  # Small cooling delay between chunks
 
@@ -427,14 +397,11 @@ class StateMergerAnalyzer:
                 prefix1 = chunk_pair['prefix1']
                 prefix2 = chunk_pair['prefix2']
 
-                # Get hidden states
                 state1 = self.get_hidden_state(prefix1)
                 state2 = self.get_hidden_state(prefix2)
 
-                # Check if merged
                 merged = self.states_merged(state1, state2)
 
-                # Record data
                 m1, m2 = len(prefix1), len(prefix2)
                 merge_data[(m1, m2)].append({
                     'original_key': chunk_key,
@@ -444,16 +411,13 @@ class StateMergerAnalyzer:
                     'distance': float(np.linalg.norm(state1 - state2))
                 })
 
-                # Immediate cleanup
                 del state1, state2
 
-        # Final save
         final_save_file = os.path.join(results_dir, f'final_results.pkl')
         with open(final_save_file, 'wb') as f:
             pickle.dump(dict(merge_data), f)
         print(f"  Saved final results to {final_save_file}")
 
-        # Compute merge fractions
         print("\nComputing merge fractions...")
         merge_fractions = {}
         for (m1, m2), data_list in merge_data.items():
