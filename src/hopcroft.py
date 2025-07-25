@@ -8,12 +8,40 @@ def hopcroft_minimize(Q, Sigma, delta, outputs):
         outputs: dict mapping q -> discrete output label (e.g. 0/1)
     Returns:
         new_states, Sigma, new_delta, new_outputs, state_map
+
+    As showin in Appendix A.3: Algorithm 1 Hopcroft’s Algorithm
+
+    Input: set of states Q with output 0, set of states F with output 1
+    Output: minimal state partition P
+    P := {F, Q \ F}
+    W := {F, Q \ F}
+    while W is not empty do
+        choose and remove a set A from W
+            for c in Σ do
+                let X be the set of states for which a transition on c leads to a state in A
+                for set Y in P for which X ∩ Y is nonempty and Y \ X is nonempty do
+                    replace Y in P by the two sets X ∩ Y and Y \ X
+                    if Y is in W then
+                        replace Y in W by the same two sets
+                    else
+                        if |X ∩ Y | ≤ |Y \ X| then
+                            add X ∩ Y to W
+                        else
+                            add Y \ X to W
+                        end if
+                    end if
+                end for
+            end for
+        end while
+    return P
+
     """
+
     # 1) Initial partition by output value
     groups = {}
     for q, y in outputs.items():
         groups.setdefault(y, set()).add(q)
-    P = [block for block in groups.values() if block]  # list of sets
+    P = [block for block in groups.values() if block]
     W = [b.copy() for b in P]
 
     # 2) Build inverse transitions for speed
@@ -35,7 +63,6 @@ def hopcroft_minimize(Q, Sigma, delta, outputs):
                         W.remove(Y)
                         W.extend([inter, diff])
                     else:
-                        # add the smaller part to W
                         W.append(inter if len(inter) <= len(diff) else diff)
                 else:
                     newP.append(Y)
