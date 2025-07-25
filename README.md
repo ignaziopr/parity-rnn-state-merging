@@ -4,7 +4,7 @@
 
 ## Purpose
 
-This project reproduces the key empirical findings from _Algorithm Development in Neural Networks: Insights from the Streaming Parity Task_: https://openreview.net/forum?id=3go0lhfxd0
+This project reproduces the key empirical findings from _Algorithm Development in Neural Networks: Insights from the Streaming Parity Task_: https://openreview.net/pdf?id=3go0lhfxd0
 
 ### Key Contributions Replicated
 
