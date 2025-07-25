@@ -1,0 +1,3 @@
+models/analysis/*/intermediate_*.pkl
+
+__pycache__/
