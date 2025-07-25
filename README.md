@@ -28,6 +28,22 @@ This replication validates that neural networks can achieve infinite generalizat
 
 ## Figures
 
+### Figure 1
+
+![Figure 1](figures/figure_1.png)
+
+### Figure 2
+
+![Figure 1](src/dfas/minimal_dfa.png)
+
+### Figure 6
+
+![Figure 6](figures/figure_6.png)
+
+### Figure 7
+
+![Figure 7](figures/figure_7.png)
+
 ## Setup
 
 1. **Clone this repository**
