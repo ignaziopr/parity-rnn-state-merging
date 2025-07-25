@@ -1,0 +1,18 @@
+# Core dependencies
+torch>=2.0.0
+torchvision
+torchaudio
+numpy
+matplotlib
+seaborn
+pandas
+
+# Scientific computing and machine learning
+scikit-learn
+
+# Visualization
+graphviz
+
+# Development tools
+jupyter
+notebook
