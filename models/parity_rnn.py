@@ -4,7 +4,7 @@ from torch.nn.utils.rnn import pad_packed_sequence
 
 
 class ParityRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, input_size, hidden_size, output_size, gain=0.99):
         super(ParityRNN, self).__init__()
         self.hidden_size = hidden_size
 
@@ -12,11 +12,11 @@ class ParityRNN(nn.Module):
                           nonlinearity='relu', batch_first=True)
         self.readout = nn.Linear(hidden_size, output_size)
 
-        nn.init.xavier_uniform_(self.rnn.weight_ih_l0, gain=0.99)
-        nn.init.xavier_uniform_(self.rnn.weight_hh_l0, gain=0.99)
+        nn.init.xavier_uniform_(self.rnn.weight_ih_l0, gain=gain)
+        nn.init.xavier_uniform_(self.rnn.weight_hh_l0, gain=gain)
         nn.init.zeros_(self.rnn.bias_ih_l0)
         nn.init.zeros_(self.rnn.bias_hh_l0)
-        nn.init.xavier_uniform_(self.readout.weight, gain=0.99)
+        nn.init.xavier_uniform_(self.readout.weight, gain=gain)
         nn.init.zeros_(self.readout.bias)
 
     def forward(self, packed_input):
